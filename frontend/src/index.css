@@ -1,0 +1,41 @@
+:root {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+  color: var(--text);
+  background-color: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+
+  --bg: #0c0d12;
+  --text: #ececf4;
+  --muted: #9a9ab0;
+  --surface: #14151c;
+  --surface-2: #1c1e28;
+  --border: #2a2d3a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, #2a1f4a 0%, transparent 55%),
+    var(--bg);
+}
+
+#root {
+  width: 100%;
+}
+
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  background: var(--surface-2);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
