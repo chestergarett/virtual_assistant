@@ -21,6 +21,25 @@ virtual_assistant/
 | **Custom chat** | [@elevenlabs/react](https://elevenlabs.io/docs/eleven-agents/libraries/react) — text / WebSocket |
 | **Official widget** | [Embed widget](https://elevenlabs.io/docs/eleven-agents/customization/widget) |
 
+## Agent authentication (private agent)
+
+When **Authentication** is enabled in the [ElevenLabs agent Security tab](https://elevenlabs.io/docs/eleven-agents/customization/authentication), the API key must stay on the server. This app already wires that up:
+
+| UI mode | Credential | Backend endpoint |
+|---------|------------|------------------|
+| **Custom call** | WebRTC conversation token | `GET /api/conversation-token` |
+| **Custom chat** | Signed WebSocket URL | `GET /api/signed-url` |
+| **Official widget** | Signed URL (fetched on each call) | `GET /api/signed-url` |
+
+**Checklist after enabling auth in the dashboard:**
+
+1. Set `ELEVENLABS_API_KEY` in `.env` (never in the frontend).
+2. Set `ELEVENLABS_REQUIRES_AUTH=true` in `.env` (the backend also reads `enable_auth` from the dashboard when the API key is set).
+3. Run the FastAPI backend on port 8000 so the Vite proxy can reach `/api/*`.
+4. Click **Start call** or **Start chat** — the browser only receives short-lived tokens/URLs.
+
+Signed URLs expire after **15 minutes**; start a new session to get a fresh one. Do not use signed URLs and allowlists on the same agent ([docs](https://elevenlabs.io/docs/eleven-agents/customization/authentication)).
+
 ## Setup
 
 1. `cp .env.example .env` and set `ELEVENLABS_API_KEY`

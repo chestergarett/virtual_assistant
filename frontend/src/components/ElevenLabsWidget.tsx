@@ -1,5 +1,6 @@
 /**
  * Official ElevenLabs embed widget — https://elevenlabs.io/docs/eleven-agents/customization/widget
+ * Auth: https://elevenlabs.io/docs/eleven-agents/customization/authentication
  */
 import { useEffect, useRef, useState } from 'react'
 import { fetchAgentConfig, fetchSignedUrl } from '../api'
@@ -26,8 +27,8 @@ function loadWidgetScript(): Promise<void> {
 
 export default function ElevenLabsWidget() {
   const widgetRef = useRef<HTMLElement | null>(null)
+  const configRef = useRef<AgentConfig | null>(null)
   const [config, setConfig] = useState<AgentConfig | null>(null)
-  const [signedUrl, setSignedUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [scriptReady, setScriptReady] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -40,11 +41,9 @@ export default function ElevenLabsWidget() {
 
   useEffect(() => {
     fetchAgentConfig()
-      .then(async (cfg) => {
+      .then((cfg) => {
+        configRef.current = cfg
         setConfig(cfg)
-        if (cfg.requires_auth) {
-          setSignedUrl(await fetchSignedUrl())
-        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load agent config'))
   }, [])
@@ -53,10 +52,13 @@ export default function ElevenLabsWidget() {
     const el = widgetRef.current
     if (!el || !config || !scriptReady) return
 
-    const onCall = (event: Event) => {
-      const detail = (event as CustomEvent<{ config: { clientTools?: Record<string, unknown> } }>)
-        .detail
+    const onCall = async (event: Event) => {
+      const custom = event as CustomEvent<{
+        config?: { clientTools?: Record<string, unknown>; signedUrl?: string }
+      }>
+      const detail = custom.detail
       if (!detail?.config) return
+
       detail.config.clientTools = {
         displayMessage: (parameters: { text: string }) => {
           window.dispatchEvent(
@@ -65,20 +67,31 @@ export default function ElevenLabsWidget() {
           return 'Message displayed'
         },
       }
+
+      const cfg = configRef.current
+      if (cfg?.requires_auth) {
+        try {
+          const signedUrl = await fetchSignedUrl()
+          detail.config.signedUrl = signedUrl
+          el.setAttribute('signed-url', signedUrl)
+          el.removeAttribute('agent-id')
+        } catch (err: unknown) {
+          setError(err instanceof Error ? err.message : 'Failed to get signed URL')
+        }
+      }
     }
 
     el.addEventListener('elevenlabs-convai:call', onCall)
 
-    if (config.requires_auth && signedUrl) {
-      el.setAttribute('signed-url', signedUrl)
+    if (config.requires_auth) {
       el.removeAttribute('agent-id')
-    } else if (!config.requires_auth) {
+    } else {
       el.setAttribute('agent-id', config.agent_id)
       el.removeAttribute('signed-url')
     }
 
     return () => el.removeEventListener('elevenlabs-convai:call', onCall)
-  }, [config, signedUrl, scriptReady])
+  }, [config, scriptReady])
 
   useEffect(() => {
     const handler = (event: Event) => setToast((event as CustomEvent<string>).detail)
@@ -90,7 +103,7 @@ export default function ElevenLabsWidget() {
     return <p className="error-banner">{error}</p>
   }
 
-  if (!config || !scriptReady || (config.requires_auth && !signedUrl)) {
+  if (!config || !scriptReady) {
     return <p className="loading">Loading official widget…</p>
   }
 

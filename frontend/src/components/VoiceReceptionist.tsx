@@ -10,11 +10,8 @@ import {
   useConversationStatus,
 } from '@elevenlabs/react'
 import type { AgentConfig } from '../api'
-import {
-  fetchAgentConfig,
-  fetchConversationToken,
-  fetchSignedUrl,
-} from '../api'
+import { fetchAgentConfig, fetchAuthCredentials } from '../api'
+import type { AuthCredentials } from '../api'
 import type { SdkChannel, TranscriptEntry } from '../types'
 
 const clientTools = {
@@ -29,19 +26,29 @@ const clientTools = {
 function buildSessionOptions(
   channel: SdkChannel,
   config: AgentConfig,
-  auth: { conversationToken?: string; signedUrl?: string },
+  auth: AuthCredentials,
 ) {
   const base = { userId: 'chester-local-dev' }
 
-  if (channel === 'voice') {
-    if (config.requires_auth && auth.conversationToken) {
+  if (config.requires_auth) {
+    if (channel === 'voice') {
+      if (!auth.conversationToken) {
+        throw new Error(
+          'Missing conversation token. Check ELEVENLABS_API_KEY on the backend and that auth is enabled in the ElevenLabs dashboard.',
+        )
+      }
       return { ...base, conversationToken: auth.conversationToken }
     }
-    return { ...base, agentId: config.agent_id }
+    if (!auth.signedUrl) {
+      throw new Error(
+        'Missing signed URL. Check ELEVENLABS_API_KEY on the backend and that auth is enabled in the ElevenLabs dashboard.',
+      )
+    }
+    return { ...base, signedUrl: auth.signedUrl, connectionType: 'websocket' as const }
   }
 
-  if (config.requires_auth && auth.signedUrl) {
-    return { ...base, signedUrl: auth.signedUrl }
+  if (channel === 'chat') {
+    return { ...base, agentId: config.agent_id, connectionType: 'websocket' as const }
   }
   return { ...base, agentId: config.agent_id }
 }
@@ -93,12 +100,14 @@ function SdkPanel({
   transcript,
   conversationError,
   onClearError,
+  onUserMessage,
 }: {
   channel: SdkChannel
   config: AgentConfig
   transcript: TranscriptEntry[]
   conversationError: string | null
   onClearError: () => void
+  onUserMessage: (text: string) => void
 }) {
   const { startSession, endSession, sendUserMessage, sendUserActivity, getInputVolume } =
     useConversationControls()
@@ -109,6 +118,7 @@ function SdkPanel({
   const transcriptEndRef = useRef<HTMLDivElement>(null)
 
   const connected = status === 'connected'
+  const connecting = status === 'connecting'
   const displayError = error ?? conversationError
   const isVoice = channel === 'voice'
 
@@ -116,7 +126,14 @@ function SdkPanel({
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [transcript])
 
+  useEffect(() => {
+    if (status === 'connected' || status === 'error' || status === 'disconnected') {
+      setBusy(false)
+    }
+  }, [status])
+
   const handleStart = async () => {
+    if (busy || connecting || connected) return
     setError(null)
     onClearError()
     setBusy(true)
@@ -124,18 +141,12 @@ function SdkPanel({
       if (isVoice) {
         await navigator.mediaDevices.getUserMedia({ audio: true })
       }
-      const auth: { conversationToken?: string; signedUrl?: string } = {}
-      if (config.requires_auth) {
-        if (isVoice) {
-          auth.conversationToken = await fetchConversationToken()
-        } else {
-          auth.signedUrl = await fetchSignedUrl()
-        }
-      }
+      const auth = config.requires_auth
+        ? await fetchAuthCredentials(isVoice ? 'voice' : 'chat')
+        : {}
       startSession(buildSessionOptions(channel, config, auth))
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to start session')
-    } finally {
       setBusy(false)
     }
   }
@@ -156,16 +167,19 @@ function SdkPanel({
           {isVoice ? (
             <>
               <div className="call-orb" aria-hidden />
-              <p className="start-panel__hint">Custom voice UI — speak and hear the agent in real time.</p>
-              <button type="button" className="btn btn--call" onClick={handleStart} disabled={busy}>
-                {busy ? 'Connecting…' : 'Start call'}
+              <button type="button" className="btn btn--call" onClick={handleStart} disabled={busy || connecting}>
+                {busy || connecting ? 'Connecting…' : 'Start call'}
               </button>
             </>
           ) : (
             <>
-              <p className="start-panel__hint">Custom chat UI — type messages to the agent.</p>
-              <button type="button" className="btn btn--primary" onClick={handleStart} disabled={busy}>
-                {busy ? 'Connecting…' : 'Start chat'}
+              <div className="chat-orb" aria-hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+                </svg>
+              </div>
+              <button type="button" className="btn btn--primary" onClick={handleStart} disabled={busy || connecting}>
+                {busy || connecting ? 'Connecting…' : 'Start chat'}
               </button>
             </>
           )}
@@ -183,6 +197,7 @@ function SdkPanel({
               e.preventDefault()
               const text = chatInput.trim()
               if (!text) return
+              onUserMessage(text)
               sendUserMessage(text)
               setChatInput('')
             }}
@@ -235,6 +250,7 @@ function SdkSession({
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [conversationError, setConversationError] = useState<string | null>(null)
   const streamingIdRef = useRef<string | null>(null)
+  const chatAgentUsesStreamingRef = useRef(false)
 
   const appendTranscript = useCallback(
     (role: TranscriptEntry['role'], text: string, id?: string) => {
@@ -265,19 +281,52 @@ function SdkSession({
         }
       }}
       onConnect={({ conversationId }) => {
+        chatAgentUsesStreamingRef.current = false
+        streamingIdRef.current = null
         appendTranscript('system', `Connected (${conversationId})`)
       }}
-      onDisconnect={() => {
-        appendTranscript('system', 'Disconnected')
+      onDisconnect={(details) => {
+        let text = 'Disconnected'
+        if (details?.reason === 'agent') {
+          const ctx = details.context
+          if (ctx && 'type' in ctx && ctx.type === 'end_call') {
+            text =
+              'Disconnected: agent used End call. Disable that tool in ElevenLabs for multi-turn chat.'
+          } else {
+            text = `Disconnected (${details.reason})`
+          }
+        } else if (details?.reason === 'error' && 'message' in details) {
+          text = `Disconnected: ${details.message}`
+        } else if (details?.reason) {
+          text = `Disconnected (${details.reason})`
+        }
+        appendTranscript('system', text)
         streamingIdRef.current = null
+        chatAgentUsesStreamingRef.current = false
       }}
       onMessage={(message) => {
         const role = message.role === 'user' ? 'user' : 'agent'
+        if (channel === 'chat') {
+          if (role === 'agent') {
+            if (chatAgentUsesStreamingRef.current) return
+            appendTranscript(role, message.message)
+            return
+          }
+          setTranscript((prev) => {
+            if (prev.some((e) => e.role === 'user' && e.text === message.message)) return prev
+            return [
+              ...prev,
+              { id: `${Date.now()}-${prev.length}`, role: 'user', text: message.message },
+            ]
+          })
+          return
+        }
         appendTranscript(role, message.message)
       }}
       onAgentChatResponsePart={(part) => {
         if (channel !== 'chat') return
         if (part.type === 'start') {
+          chatAgentUsesStreamingRef.current = true
           streamingIdRef.current = `stream-${Date.now()}`
           appendTranscript('agent', '', streamingIdRef.current)
         } else if (part.type === 'delta' && streamingIdRef.current) {
@@ -303,6 +352,7 @@ function SdkSession({
         transcript={transcript}
         conversationError={conversationError}
         onClearError={() => setConversationError(null)}
+        onUserMessage={(text) => appendTranscript('user', text)}
       />
     </ConversationProvider>
   )

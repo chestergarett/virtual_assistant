@@ -11,10 +11,15 @@ import httpx
 AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")
 BRANCH_ID = os.getenv("ELEVENLABS_BRANCH_ID")
 
-AGENT_NAME = "Voice Receptionist"
+AGENT_NAME = "Chester AI"
 DESCRIPTION = (
-    "Front-desk voice assistant that greets callers, answers common questions, "
-    "and routes or schedules follow-ups."
+    "Chester Garett Calingacion is an AI Engineer based in Los Angeles, building document AI, LLM "
+    "applications, generative media workflows, and automation with Python, AWS Bedrock, SageMaker, "
+    "Vertex AI, LangChain, CrewAI, and n8n. "
+    "He previously worked at JPMorgan Chase, Bluefletch, and Ernst & Young on process improvement, "
+    "data engineering, analytics, and ETL using SQL, Alteryx, Tableau, Power BI, and BigQuery. "
+    "He holds Databricks GenAI, AWS Machine Learning Specialty, and Azure AI certifications, "
+    "along with a B.S. in Accountancy from Silliman University and CPA credentials."
 )
 
 # Set False only for local prototyping with a public agent (auth disabled in dashboard).
@@ -81,6 +86,34 @@ async def get_conversation_token(
         if not token:
             raise ValueError("ElevenLabs response missing token")
         return token
+
+
+async def get_agent_auth_settings(
+    api_key: str,
+    *,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Read agent authentication settings from the ElevenLabs dashboard."""
+    aid = agent_id or AGENT_ID
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{ELEVENLABS_API_BASE}/convai/agents/{aid}",
+            headers={"xi-api-key": api_key},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        auth = (data.get("platform_settings") or {}).get("auth") or {}
+        allowlist = [
+            item.get("hostname")
+            for item in (auth.get("allowlist") or [])
+            if isinstance(item, dict) and item.get("hostname")
+        ]
+        return {
+            "agent_id": aid,
+            "enable_auth": bool(auth.get("enable_auth")),
+            "allowlist_hostnames": allowlist,
+        }
 
 
 async def get_agent_voice_status(

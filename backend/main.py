@@ -14,8 +14,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agents.voice_receptionist import (  # noqa: E402
+    REQUIRES_AUTH,
     agent_config,
     ensure_voice_mode,
+    get_agent_auth_settings,
     get_agent_voice_status,
     get_conversation_token,
     get_signed_url,
@@ -46,7 +48,40 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/agent/config")
 async def read_agent_config() -> dict:
-    return agent_config()
+    """Public agent metadata; syncs requires_auth with the ElevenLabs dashboard when possible."""
+    cfg = agent_config()
+    if not settings.elevenlabs_api_key:
+        cfg["auth_note"] = (
+            "Set ELEVENLABS_API_KEY on the server to issue signed URLs / conversation tokens."
+        )
+        return cfg
+
+    try:
+        auth = await get_agent_auth_settings(settings.elevenlabs_api_key)
+        dashboard_auth = auth["enable_auth"]
+        cfg["requires_auth"] = dashboard_auth
+        cfg["dashboard_auth_enabled"] = dashboard_auth
+        cfg["allowlist_hostnames"] = auth["allowlist_hostnames"]
+        if dashboard_auth != REQUIRES_AUTH:
+            cfg["auth_config_mismatch"] = (
+                f".env ELEVENLABS_REQUIRES_AUTH={REQUIRES_AUTH} but dashboard enable_auth={dashboard_auth}. "
+                "Using dashboard value."
+            )
+        if dashboard_auth:
+            cfg["auth_note"] = (
+                "Private agent: the frontend requests short-lived credentials from this backend "
+                "(never expose ELEVENLABS_API_KEY in the browser)."
+            )
+        elif auth["allowlist_hostnames"]:
+            cfg["auth_note"] = (
+                "Allowlist-only agent: ensure your app origin is on the dashboard allowlist."
+            )
+    except httpx.HTTPStatusError as exc:
+        cfg["auth_note"] = f"Could not read dashboard auth settings ({exc.response.status_code})."
+    except Exception as exc:
+        cfg["auth_note"] = f"Could not read dashboard auth settings: {exc}"
+
+    return cfg
 
 
 @app.get("/api/conversation-token")
