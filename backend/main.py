@@ -13,6 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from dotenv import load_dotenv
+
+load_dotenv(ROOT / ".env")
+
 from agents.voice_receptionist import (  # noqa: E402
     REQUIRES_AUTH,
     agent_config,
@@ -23,6 +27,7 @@ from agents.voice_receptionist import (  # noqa: E402
     get_signed_url,
 )
 from backend.config import get_settings  # noqa: E402
+from backend.webhooks.elevenlabs import router as elevenlabs_webhook_router  # noqa: E402
 
 app = FastAPI(
     title="Virtual Assistant API",
@@ -40,10 +45,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(elevenlabs_webhook_router)
+
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/integrations/status")
+async def integrations_status() -> dict:
+    """Check which post-call integrations are configured (no secrets exposed)."""
+    s = get_settings()
+    return {
+        "webhook_endpoint": "/webhooks/elevenlabs",
+        "elevenlabs_webhook_secret_set": bool(s.elevenlabs_webhook_secret),
+        "supabase_configured": bool(s.supabase_url and s.supabase_service_role_key),
+        "email_configured": bool(
+            s.notify_email_to
+            and (s.resend_api_key or (s.smtp_host and s.smtp_user and s.smtp_password))
+        ),
+        "email_via": "resend" if s.resend_api_key else ("smtp" if s.smtp_host else "none"),
+        "hint": (
+            "Configure at ElevenAgents → Settings (https://elevenlabs.io/app/agents/settings), "
+            "not Settings → API Webhooks. POST https://YOUR-HOST/webhooks/elevenlabs "
+            "with post_call_transcription enabled. Watch logs for 'ElevenLabs webhook received'."
+        ),
+        "docs": "https://elevenlabs.io/docs/eleven-agents/workflows/post-call-webhooks",
+    }
 
 
 @app.get("/api/agent/config")
@@ -84,6 +113,17 @@ async def read_agent_config() -> dict:
     return cfg
 
 
+def _require_agent_id() -> str:
+    from agents.voice_receptionist import AGENT_ID
+
+    if not AGENT_ID:
+        raise HTTPException(
+            status_code=500,
+            detail="ELEVENLABS_AGENT_ID is not set. Add it to .env from your ElevenLabs agent page.",
+        )
+    return AGENT_ID
+
+
 @app.get("/api/conversation-token")
 async def conversation_token() -> dict[str, str]:
     """Issue a WebRTC token for voice conversations (keeps API key server-side)."""
@@ -92,6 +132,7 @@ async def conversation_token() -> dict[str, str]:
             status_code=500,
             detail="ELEVENLABS_API_KEY is not set on the server.",
         )
+    _require_agent_id()
     try:
         token = await get_conversation_token(settings.elevenlabs_api_key)
         return {"token": token}
@@ -112,6 +153,7 @@ async def signed_url() -> dict[str, str]:
             status_code=500,
             detail="ELEVENLABS_API_KEY is not set on the server.",
         )
+    _require_agent_id()
     try:
         url = await get_signed_url(settings.elevenlabs_api_key)
         return {"signed_url": url}

@@ -27,7 +27,13 @@ function App() {
     <div className="app-shell">
       <header className="app-topbar">
         <div className="app-brand">
-          <span className="app-brand__mark" aria-hidden />
+          <img
+            className="app-brand__mark"
+            src="/monument-valley-icon.svg"
+            alt=""
+            width={28}
+            height={28}
+          />
           <span className="app-brand__name">Chester Garett Calingacion | AI Engineer</span>
         </div>
       </header>

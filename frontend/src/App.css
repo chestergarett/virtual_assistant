@@ -33,10 +33,11 @@
 }
 
 .app-brand__mark {
+  display: block;
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   border-radius: 8px;
-  background: var(--text);
   box-shadow: var(--shadow-sm);
 }
 

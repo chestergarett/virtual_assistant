@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
+
+# Load .env before reading IDs (main.py may import this module before backend.config).
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # From your ElevenLabs dashboard / talk-to URL
 AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")

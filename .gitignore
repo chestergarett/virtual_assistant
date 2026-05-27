@@ -1,4 +1,6 @@
 .env
+.env.cloudrun.yaml
+.env.deploy.*
 .venv/
 venv/
 __pycache__/
